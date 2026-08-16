@@ -123,26 +123,41 @@ for (const si of which) {
     sign: si, sys: 'vedic', d1: D1, d2: D2, dur: DUR, month: MONTH_UR,
     headline: script.headline, dates: script.dates, captions: script.captions, map: false
   });
-  const capsOut = await page.evaluate(() => window.FSVS.captionsOut());
+  let capsOut = await page.evaluate(() => window.FSVS.captionsOut());
+  let DUR_ACTUAL = DUR;
 
-  /* 4 · اردو آواز */
+  /* 4 · اردو آواز — دو مرحلوں میں
+        پہلا: اصل دورانیے معلوم کرنے کے لیے
+        دوسرا: اُن دورانیوں پر جملے ٹھیک بٹھا کر آخری WAV               */
   let wav = null;
+  const voice = script.voice || 'ur-PK-UzmaNeural';
   try {
-    const t = await api('tts.php', {
-      captions: capsOut, voice: script.voice || 'ur-PK-UzmaNeural',
-      rate: -6, pitch: 0, dur: DUR, tag: `s${si + 1}-${TAG}`
-    });
-    if (t.ok) {
-      wav = path.join(OUT, `voice-${si + 1}-${TAG}.wav`);
-      fs.writeFileSync(wav, Buffer.from(await (await fetch(`${BASE}/${t.url}`)).arrayBuffer()));
-      log(`   آواز: ${t.seconds}س${t.warn?.length ? ` · ⚠ ${t.warn.length} جملے تنگ` : ''}`);
-    } else { console.error('  ⚠ آواز:', t.err, '— بغیر آواز بنے گی'); }
-  } catch (e) { console.error('  ⚠ آواز:', e.message); }
+    let caps = capsOut;
+    let t = await api('tts.php', { captions: caps, voice, rate: -6, pitch: 0, dur: DUR, tag: `s${si+1}-${TAG}-a` });
+    if (!t.ok) throw new Error(t.err + (t.detail ? ' — ' + t.detail : ''));
+
+    /* اصل دورانیے صفحے کو دو → وہ جملے ایک کے بعد ایک باندھ دے گا */
+    const fixed = await page.evaluate(c => window.FSVS.applyVoice(c), t.clips);
+    DUR_ACTUAL = fixed.dur;
+    caps = await page.evaluate(() => window.FSVS.captionsOut());
+
+    t = await api('tts.php', { captions: caps, voice, rate: -6, pitch: 0, dur: DUR_ACTUAL, tag: `s${si+1}-${TAG}` });
+    if (!t.ok) throw new Error(t.err);
+
+    wav = path.join(OUT, `voice-${si+1}-${TAG}.wav`);
+    fs.writeFileSync(wav, Buffer.from(await (await fetch(`${BASE}/${t.url}`)).arrayBuffer()));
+    const speech = t.clips.reduce((a, c) => a + c.sec, 0);
+    const quiet  = Math.max(0, t.seconds - speech);
+    log(`   آواز: ${t.seconds}س · بولنا ${speech.toFixed(1)}س · خاموشی ${quiet.toFixed(1)}س (${Math.round(quiet/t.seconds*100)}%)`);
+    if (quiet > t.seconds * 0.20) console.error(`  ⚠ خاموشی ${Math.round(quiet/t.seconds*100)}% — تحریر مختصر ہے`);
+  } catch (e) {
+    console.error('  ⚠ آواز:', e.message, '— بغیر آواز بنے گی');
+  }
 
   /* 5 · فریم بہ فریم (deterministic — کوئی فریم نہیں گرتا) */
   const mp4 = path.join(OUT, `sky-${TAG}-${String(si + 1).padStart(2, '0')}-${SIGN_EN[si].toLowerCase()}.mp4`);
   const ff = encoder(mp4, wav);
-  const total = Math.round(DUR * FPS);
+  const total = Math.round(DUR_ACTUAL * FPS);
   for (let i = 0; i < total; i++) {
     const dataUrl = await page.evaluate(t => {
       window.FSVS.setFrame(t);
@@ -164,7 +179,7 @@ for (const si of which) {
     kind: 'sign', month: TAG, sign: si, signUr: SIGNS[si], signEn: SIGN_EN[si],
     monthUr: MONTH_UR, dur: DUR, headline: script.headline, dates: script.dates,
     caption: script.social, hashtags: script.hashtags, voice: script.voice || 'ur-PK-UzmaNeural',
-    seconds: DUR, bytes: size, builtAt: new Date().toISOString()
+    seconds: DUR_ACTUAL, bytes: size, builtAt: new Date().toISOString()
   };
   fs.writeFileSync(mp4.replace(/\.mp4$/, '.json'), JSON.stringify(meta, null, 1));
 
