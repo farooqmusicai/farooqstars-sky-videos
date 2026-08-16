@@ -1,0 +1,12 @@
+{
+  "name": "farooqstars-sky-videos",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "FarooqStars — ماہانہ اردو راشی ویڈیو کا خودکار جنریٹر",
+  "scripts": {
+    "build": "node render.mjs",
+    "dry": "FS_DRY=1 node render.mjs"
+  },
+  "dependencies": { "playwright": "1.49.0" }
+}
