@@ -71,4 +71,4 @@ jobs:
           FS_BASE: ${{ secrets.FS_BASE }}
           FS_KEY: ${{ secrets.FS_SKY_SAVE_KEY }}
         run: |
-          curl -s -F "key=$FS_KEY" -F "action=clean" "$FS_BASE/api/sky-vault.php" || true
+          curl -s --max-time 60 -A "Mozilla/5.0 (X11; Linux x86_64) Chrome/126.0 Safari/537.36" -F "key=$FS_KEY" -F "action=clean" "$FS_BASE/api/sky-vault.php" || true
