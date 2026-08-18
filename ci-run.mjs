@@ -25,25 +25,41 @@ const RASHI=['میش','ورشبھ','متھن','کرک','سنگھ','کنیا','ت
 const MURD=['جنوری','فروری','مارچ','اپریل','مئی','جون','جولائی','اگست','ستمبر','اکتوبر','نومبر','دسمبر'];
 const monthUr = MURD[+MONTH.slice(5,7)-1]+' '+MONTH.slice(0,4);
 
+const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+async function rfetch(url, opts={}, tries=4){
+  let lastErr=null;
+  for(let i=0;i<tries;i++){
+    const ac=new AbortController(); const to=setTimeout(()=>ac.abort(), 45000);
+    try{
+      const r=await fetch(url, {...opts, signal:ac.signal,
+        headers:{'User-Agent':UA, 'Accept':'application/json,text/plain,*/*', 'Accept-Language':'en,ur;q=0.8',
+                 'Referer':FS_BASE+'/admin.html', ...(opts.headers||{})}});
+      clearTimeout(to);
+      if(r.status===429 || r.status===503){ lastErr=new Error('http_'+r.status); await new Promise(s=>setTimeout(s, 4000*(i+1))); continue; }
+      return r;
+    }catch(e){ clearTimeout(to); lastErr=e; await new Promise(s=>setTimeout(s, 3000*(i+1))); }
+  }
+  throw new Error('fetch_unreachable: '+(lastErr&&lastErr.message||lastErr));
+}
 async function post(url, form){
   const fd=new FormData();
   for(const [k,v] of Object.entries(form)){
     if (v && v.__file) fd.append(k, new Blob([fs.readFileSync(v.__file)]), path.basename(v.__file));
     else fd.append(k, String(v));
   }
-  const r=await fetch(url,{method:'POST',body:fd});
+  const r=await rfetch(url,{method:'POST',body:fd});
   const tx=await r.text();
   try{ return JSON.parse(tx); }catch(e){ return {ok:false,err:'non_json',status:r.status,body:tx.slice(0,300)}; }
 }
 const vault = form => post(FS_BASE+'/api/sky-vault.php', {key:KEY, ...form});
 
 async function fetchVoice(caps, dur, tag){
-  const r = await fetch(FS_BASE+'/api/tts.php', {method:'POST',
+  const r = await rfetch(FS_BASE+'/api/tts.php', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({captions:caps.map(c=>({t:c.t,text:c.text})), voice:'ur-PK-UzmaNeural', dur, tag})});
   const j = await r.json().catch(()=>null);
   if (!j || !j.ok || !j.url) throw new Error('tts_failed: '+JSON.stringify(j).slice(0,200));
-  const wav = await fetch(FS_BASE+'/'+j.url.replace(/^\//,''));
+  const wav = await rfetch(FS_BASE+'/'+j.url.replace(/^\//,''));
   if (!wav.ok) throw new Error('tts_download_'+wav.status);
   const p = '/tmp/voice-'+tag+'.wav';
   fs.writeFileSync(p, Buffer.from(await wav.arrayBuffer()));
@@ -54,7 +70,7 @@ async function fetchSignScript(sys, signIdx){
   // api/sky-script.php (LIVE contract, read 18 Aug): JSON POST php://input,
   // {sign:int, month:'YYYY-MM', monthUr, dur} -> {ok, signUr, headline, dates[],
   //  captions[strings], hashtags, social, chars}. No key. Cached in fs-var/sky-scripts.
-  const r = await fetch(FS_BASE+'/api/sky-script.php', {method:'POST',
+  const r = await rfetch(FS_BASE+'/api/sky-script.php', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({sign:signIdx, month:MONTH, monthUr, dur:120})});
   const j = await r.json().catch(()=>null);
@@ -76,7 +92,7 @@ async function fetchSignScript(sys, signIdx){
 async function ensureMusic(){
   const p='/tmp/sky-bed.mp3';
   if (fs.existsSync(p) && fs.statSync(p).size>200000) return p;
-  const r=await fetch(FS_BASE+'/media/audio/sky-bed-1.mp3');
+  const r=await rfetch(FS_BASE+'/media/audio/sky-bed-1.mp3');
   if(!r.ok) throw new Error('music_download_'+r.status);
   fs.writeFileSync(p, Buffer.from(await r.arrayBuffer()));
   return p;
@@ -87,7 +103,7 @@ async function ensurePage(){
   const p='/tmp/skybrand.html';
   if (fs.existsSync(p) && fs.statSync(p).size>400000) return p;
   try{
-    const r=await fetch(FS_BASE+'/sky-render-page.html');
+    const r=await rfetch(FS_BASE+'/sky-render-page.html');
     if (r.ok){ const t=await r.text();
       if (t.length>400000){ fs.writeFileSync(p,t); return p; } }
   }catch(e){}
