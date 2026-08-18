@@ -22,6 +22,10 @@ on:
         description: "'' general · '6' · '0,3,6' · 'all'"
         required: false
         default: ''
+      force:
+        description: 'yes = re-render and REPLACE existing videos'
+        required: false
+        default: ''
   schedule:
     - cron: '0 23 28 * *'
 
@@ -63,6 +67,7 @@ jobs:
           MONTH: ${{ steps.m.outputs.month }}
           SYS: ${{ github.event.inputs.sys || 'both' }}
           SIGNS: ${{ github.event.inputs.signs || '' }}
+          FORCE: ${{ github.event.inputs.force || '' }}
           TARGET_MB: '6.5'      # hard size budget per video (5-7 MB rule)
           RENDER_SCALE: '0.5'   # WebGL at half res, text full res => ~4x faster
         run: node ci-run.mjs
