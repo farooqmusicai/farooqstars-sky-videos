@@ -150,7 +150,14 @@ function render(sys, script, voicePath, outFile, pagePath){
 }
 
 const systems = SYSIN==='both' ? ['west','vedic'] : [SYSIN];
-const signList = SIGNS==='' ? [null] : SIGNS.split(',').map(s=>parseInt(s,10)).filter(n=>n>=0&&n<12);
+const signList = SIGNS==='' ? [null]
+  : SIGNS.toLowerCase()==='all' ? Array.from({length:12},(_,i)=>i)
+  : SIGNS.split(',').map(s=>{
+      const t=s.trim().toLowerCase();
+      const bySlug=SLUGS.indexOf(t);
+      return bySlug>=0 ? bySlug : parseInt(t,10);
+    }).filter(n=>Number.isInteger(n)&&n>=0&&n<12);
+if (!signList.length){ console.error('SIGNS parse gave nothing:', JSON.stringify(SIGNS)); process.exit(4); }
 const report=[];
 for (const sys of systems){
   for (const sg of signList){
