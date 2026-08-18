@@ -1,12 +1,19 @@
 {
   "name": "farooqstars-sky-videos",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "FarooqStars — ماہانہ اردو راشی ویڈیو کا خودکار جنریٹر",
+  "description": "FarooqStars — ماہانہ اردو راشی ویڈیو کا خودکار جنریٹر (v1 render.mjs + v2 ci-run.mjs)",
   "scripts": {
     "build": "node render.mjs",
-    "dry": "FS_DRY=1 node render.mjs"
+    "dry": "FS_DRY=1 node render.mjs",
+    "v2": "node ci-run.mjs"
   },
-  "dependencies": { "playwright": "1.49.0" }
+  "dependencies": {
+    "playwright": "1.49.0",
+    "ephemeris": "2.2.0",
+    "@fontsource/noto-nastaliq-urdu": "^5.0.0",
+    "@fontsource/noto-naskh-arabic": "^5.0.0",
+    "@fontsource/noto-sans-symbols-2": "^5.0.0"
+  }
 }
