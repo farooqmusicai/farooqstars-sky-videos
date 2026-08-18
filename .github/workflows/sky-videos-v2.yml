@@ -1,0 +1,74 @@
+name: Sky Videos v2
+# Monthly 3D Urdu sky videos — renders the approved farooqskybrand look on the
+# server (frame-stepped, deterministic), voice (tts.php) + music mixed, uploads
+# to farooqstars.com via api/sky-vault.php (dedup: existing videos are skipped).
+#
+# AUTO  : 28th 23:00 UTC (~2am Doha) => NEXT month, both systems, 2 GENERAL videos.
+# MANUAL: Run workflow (or admin page "make") with month/sys/signs
+#         signs '' = general · '6' = one sign · '0,3,6' = several · 'all' = 12.
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'Target month YYYY-MM (empty = next month)'
+        required: false
+        default: ''
+      sys:
+        description: 'west | vedic | both'
+        required: false
+        default: 'both'
+      signs:
+        description: "'' general · '6' · '0,3,6' · 'all'"
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 23 28 * *'
+
+concurrency:
+  group: sky-videos
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: System deps (ffmpeg)
+        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
+
+      - name: Node deps
+        run: npm install --no-audit --no-fund
+
+      - name: Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Resolve month
+        id: m
+        run: |
+          M="${{ github.event.inputs.month }}"
+          if [ -z "$M" ]; then M=$(date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m); fi
+          echo "month=$M" >> "$GITHUB_OUTPUT"
+
+      - name: Render + upload
+        env:
+          FS_BASE: ${{ secrets.FS_BASE }}
+          FS_KEY: ${{ secrets.FS_SKY_SAVE_KEY }}
+          MONTH: ${{ steps.m.outputs.month }}
+          SYS: ${{ github.event.inputs.sys || 'both' }}
+          SIGNS: ${{ github.event.inputs.signs || '' }}
+        run: node ci-run.mjs
+
+      - name: Retention clean (40 din)
+        if: always()
+        env:
+          FS_BASE: ${{ secrets.FS_BASE }}
+          FS_KEY: ${{ secrets.FS_SKY_SAVE_KEY }}
+        run: |
+          curl -s -F "key=$FS_KEY" -F "action=clean" "$FS_BASE/api/sky-vault.php" || true
