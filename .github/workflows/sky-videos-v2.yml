@@ -32,7 +32,7 @@ concurrency:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +63,8 @@ jobs:
           MONTH: ${{ steps.m.outputs.month }}
           SYS: ${{ github.event.inputs.sys || 'both' }}
           SIGNS: ${{ github.event.inputs.signs || '' }}
+          TARGET_MB: '6.5'      # hard size budget per video (5-7 MB rule)
+          RENDER_SCALE: '0.5'   # WebGL at half res, text full res => ~4x faster
         run: node ci-run.mjs
 
       - name: Retention clean (40 din)
