@@ -99,6 +99,11 @@ const pg = await ctx.newPage();
 let perr=null; pg.on('pageerror',e=>perr=String(e).slice(0,300));
 await pg.goto('file://'+PAGE+'?rs='+RSCALE);
 await pg.addStyleTag({content:FONT_CSS});
+await pg.evaluate(async()=>{ await document.fonts.ready;
+  // force-load the exact faces the canvas uses, then wait again
+  for (const f of ['16px "Noto Nastaliq Urdu"','700 16px "Noto Nastaliq Urdu"','16px "Noto Sans Symbols 2"'])
+    try{ await document.fonts.load(f,'میزان ♎'); }catch(e){}
+  await document.fonts.ready; });
 await pg.evaluate('window.__run(6,33.33)');
 
 /* language → Urdu (button toggles; verify body.ur) */

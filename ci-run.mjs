@@ -17,6 +17,7 @@ const KEY = process.env.FS_KEY||'';
 const MONTH = process.env.MONTH;
 const SYSIN = process.env.SYS||'both';
 const SIGNS = (process.env.SIGNS||'').trim();
+const FORCE = /^(1|true|yes)$/i.test((process.env.FORCE||'').trim());
 if (!MONTH || !KEY){ console.error('need MONTH + FS_KEY'); process.exit(2); }
 
 const SLUGS=['aries','taurus','gemini','cancer','leo','virgo','libra','scorpio','sagittarius','capricorn','aquarius','pisces'];
@@ -126,16 +127,16 @@ async function ensureMusic(){
 }
 
 async function ensurePage(){
-  // The approved renderer page lives on the server (single source of truth).
+  // The renderer page ships IN THIS REPO — that is the single source of truth
+  // (fonts embedded, wheel fit, text fit). Server copy is only a fallback.
+  const local=path.join(__dir,'sky-render-page.html');
+  if (fs.existsSync(local) && fs.statSync(local).size>400000) return local;
   const p='/tmp/skybrand.html';
-  if (fs.existsSync(p) && fs.statSync(p).size>400000) return p;
   try{
     const r=await rfetch(FS_BASE+'/sky-render-page.html');
     if (r.ok){ const t=await r.text();
       if (t.length>400000){ fs.writeFileSync(p,t); return p; } }
   }catch(e){}
-  const local=path.join(ROOT,'page','skybrand.html');          // repo fallback
-  if (fs.existsSync(local)) return local;
   throw new Error('render_page_unavailable');
 }
 
@@ -158,7 +159,15 @@ for (const sys of systems){
     const label = `${MONTH}-${sys}-${slug}`;
     try{
       const ex = await vault({action:'exists', month:MONTH, sys, sign:slug});
-      if (ex.ok && ex.exists){ report.push({label, skipped:'exists'}); console.log('SKIP (exists)', label); continue; }
+      if (ex.ok && ex.exists && !FORCE){ report.push({label, skipped:'exists'}); console.log('SKIP (exists)', label); continue; }
+      if (ex.ok && ex.exists && FORCE){
+        // force = replace the defective video: find its file in the vault and remove
+        // it just before saving the new one, so the label can never go missing long.
+        const ls = await vault({action:'list'});
+        const old = (ls.items||[]).filter(i=>i.month===MONTH && i.sys===sys && i.sign===slug);
+        for (const o of old){ const d=await vault({action:'del', file:o.file});
+          console.log('FORCE replace: removed', o.file, d.ok?'ok':d.err); }
+      }
       const script = isGeneral ? generalReading(MONTH, sys) : await signScript(sys, sg);
       const voice = await fetchVoice(script.caps, script.dur, label);
       /* voice determines timing (16-Aug rule): re-time captions from real clip starts */
@@ -178,7 +187,7 @@ for (const sys of systems){
         + '\nاپنی چاند راشی مفت جانیے: farooqstars.com');
       const hashtags = script.hashtags || (isGeneral ? `#astrology #${sys==='vedic'?'vedic':'zodiac'} #urdu #farooqstars`
         : `#${SLUGS[sg]} #astrology #monthlyhoroscope #urdu #farooqstars`);
-      const sv = await vault({action:'save', month:MONTH, sys, sign:slug, dur:script.dur, hash:script.hash||'',
+      const sv = await vault({action:'save', month:MONTH, sys, sign:slug, dur:script.dur, hash:script.hash||'', force:FORCE?'1':'',
         caption, hashtags, voice:'ur-PK-UzmaNeural', video:{__file:out}});
       if (!sv.ok) throw new Error('save_failed '+JSON.stringify(sv).slice(0,200));
       report.push({label, saved:sv.saved, dedup:sv.dedup||false, sizeMB:sv.sizeMB});
