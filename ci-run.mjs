@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { generalScript } from './events.mjs';
+import { generalReading, buildReading, toCaption } from './reading.mjs';
 import { fileURLToPath } from 'url';
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dir,'..');
@@ -66,13 +66,26 @@ async function fetchVoice(caps, dur, tag){
   return {path:p, clips:j.clips||null, seconds:j.seconds||null};
 }
 
+function localSignScript(sys, signIdx){
+  // Fallback: deterministic reading from the real ephemeris (reading.mjs).
+  const [y,mo] = MONTH.split('-').map(Number);
+  const r = buildReading({ year:y, month:mo, sign:signIdx,
+                           system: sys==='vedic' ? 'rashi' : 'burj' });
+  const dur = Math.min(150, Math.max(90, Math.ceil(r.estSpeech + 6)));
+  return { dur,
+    badge: r.badge,
+    head:  r.headline.l1 + '\n' + r.headline.l2,
+    dates: r.keyDatesLine,
+    caps:  r.script.map(sn => ({ t: sn.t, text: sn.text })),
+    monthUr, hashtags: null, social: toCaption(r), hash: r.hash, source:'engine' };
+}
+
 async function fetchSignScript(sys, signIdx){
-  // api/sky-script.php (LIVE contract, read 18 Aug): JSON POST php://input,
-  // {sign:int, month:'YYYY-MM', monthUr, dur} -> {ok, signUr, headline, dates[],
-  //  captions[strings], hashtags, social, chars}. No key. Cached in fs-var/sky-scripts.
+  // PRIMARY: the server's cached Claude-written readings (api/sky-script.php,
+  // cached in fs-var/sky-scripts). Farooq's system of record for interpretation.
   const r = await rfetch(FS_BASE+'/api/sky-script.php', {method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({sign:signIdx, month:MONTH, monthUr, dur:120})});
+    body: JSON.stringify({sign:signIdx, month:MONTH, monthUr, dur:120, sys})});
   const j = await r.json().catch(()=>null);
   if (!j || !j.ok) throw new Error('script_failed: '+JSON.stringify(j).slice(0,220));
   const lines = j.captions || j.sentences || j.lines;
@@ -83,10 +96,24 @@ async function fetchSignScript(sys, signIdx){
   const name = sys==='vedic'?RASHI[signIdx]:BURJ[signIdx];
   const sysWord = sys==='vedic'?'راشی':'برج';
   return { dur,
-    badge: `${name} ${sysWord} · ${monthUr}`,
+    badge: sys==='vedic' ? `${name} ${sysWord} · ${monthUr}` : `${sysWord}ِ ${name} · ${monthUr}`,
     head:  j.headline || `${name} — ${monthUr}\nآسمان کیا کہتا ہے`,
     dates: 'اہم تاریخیں: '+(Array.isArray(j.dates)?j.dates.join(' · '):String(j.dates||'')),
-    caps, monthUr, hashtags: j.hashtags||null, social: j.social||null };
+    caps, monthUr, hashtags: j.hashtags||null, social: j.social||null,
+    hash: null, source:'server-cache' };
+}
+
+async function signScript(sys, signIdx){
+  // server cache first (Claude's readings, already made) -> engine fallback
+  const mode = (process.env.SCRIPT_SOURCE||'auto');
+  if (mode==='local') return localSignScript(sys, signIdx);
+  try { const sc = await fetchSignScript(sys, signIdx);
+        console.log('script: server cache (Claude reading)'); return sc; }
+  catch(e){
+    if (mode==='server') throw e;
+    console.log('script: server unavailable ('+String(e.message).slice(0,80)+') -> local engine');
+    return localSignScript(sys, signIdx);
+  }
 }
 
 async function ensureMusic(){
@@ -132,7 +159,7 @@ for (const sys of systems){
     try{
       const ex = await vault({action:'exists', month:MONTH, sys, sign:slug});
       if (ex.ok && ex.exists){ report.push({label, skipped:'exists'}); console.log('SKIP (exists)', label); continue; }
-      const script = isGeneral ? generalScript(MONTH, sys) : await fetchSignScript(sys, sg);
+      const script = isGeneral ? generalReading(MONTH, sys) : await signScript(sys, sg);
       const voice = await fetchVoice(script.caps, script.dur, label);
       /* voice determines timing (16-Aug rule): re-time captions from real clip starts */
       if (Array.isArray(voice.clips) && voice.clips.length===script.caps.length &&
@@ -144,14 +171,14 @@ for (const sys of systems){
       const out='/tmp/out-'+label+'.mp4';
       render(sys, script, voice.path, out, pagePath);
       /* TikTok/YT caption: headline + full script + trust stamp (competitor formula) */
-      const caption = script.head.replace('\n',' — ')
+      const caption = script.social || (script.head.replace('\n',' — ')
         + '\n\n' + script.caps.map(c=>c.text).join(' ')
         + '\n\n' + script.dates
         + '\n\nتمام مقامات اصل ephemeris (Keplerian + ELP2000) سے شمار شدہ — آسمان جھوٹ نہیں بولتا۔'
-        + '\nاپنی چاند راشی مفت جانیے: farooqstars.com';
+        + '\nاپنی چاند راشی مفت جانیے: farooqstars.com');
       const hashtags = script.hashtags || (isGeneral ? `#astrology #${sys==='vedic'?'vedic':'zodiac'} #urdu #farooqstars`
         : `#${SLUGS[sg]} #astrology #monthlyhoroscope #urdu #farooqstars`);
-      const sv = await vault({action:'save', month:MONTH, sys, sign:slug, dur:script.dur,
+      const sv = await vault({action:'save', month:MONTH, sys, sign:slug, dur:script.dur, hash:script.hash||'',
         caption, hashtags, voice:'ur-PK-UzmaNeural', video:{__file:out}});
       if (!sv.ok) throw new Error('save_failed '+JSON.stringify(sv).slice(0,200));
       report.push({label, saved:sv.saved, dedup:sv.dedup||false, sizeMB:sv.sizeMB});

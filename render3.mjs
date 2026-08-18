@@ -32,7 +32,9 @@ const SCRIPT= arg('script');
 const VOICE = arg('voice','');
 const MUSIC = arg('music');
 const OUT   = arg('out','out/video.mp4');
-const FPS   = +arg('fps','30');
+const FPS   = +arg('fps','24');                       // 24 is plenty for slow orbital motion
+const RSCALE= arg('rs', process.env.RENDER_SCALE || '0.5'); // WebGL layer scale; text stays 1080
+const TARGET_MB = +(arg('mb', process.env.TARGET_MB || '6.5'));
 const PAGE  = arg('page', path.join(ROOT,'ref','skybrand.html'));
 const WORK  = arg('workdir','/tmp/sky3');
 const EXE   = arg('chrome', process.env.CHROME_EXE || '');   // '' => playwright's own chromium
@@ -95,7 +97,7 @@ await ctx.addInitScript(`
 `);
 const pg = await ctx.newPage();
 let perr=null; pg.on('pageerror',e=>perr=String(e).slice(0,300));
-await pg.goto('file://'+PAGE);
+await pg.goto('file://'+PAGE+'?rs='+RSCALE);
 await pg.addStyleTag({content:FONT_CSS});
 await pg.evaluate('window.__run(6,33.33)');
 
@@ -146,7 +148,7 @@ const t0=Date.now();
 const START=+(process.env.START||0), END=Math.min(+(process.env.END||N),N);
 if (START>0) await pg.evaluate(`window.__run(${START},${1000/FPS})`);   // fast-forward (still renders — deterministic)
 for(let i=START;i<END;i++){
-  const d=await pg.evaluate(`(window.__step(${1000/FPS}), document.getElementById('stage').toDataURL('image/jpeg',0.94))`);
+  const d=await pg.evaluate(`(window.__step(${1000/FPS}), document.getElementById('stage').toDataURL('image/jpeg',0.90))`);
   fs.writeFileSync(path.join(fdir,'f'+String(i).padStart(5,'0')+'.jpg'), Buffer.from(d.split(',')[1],'base64'));
   if(i%300===0) console.log(JSON.stringify({frames:i,of:N,msPerFrame:+((Date.now()-t0)/(i-START+1)).toFixed(0)}));
   if(perr){ console.error('PAGEERR',perr); process.exit(4); }
@@ -164,10 +166,24 @@ const af = voiceOK
     `[duck][vmix]amix=inputs=2:duration=first:normalize=0[aout]`
   : `[2:a]aloop=loop=-1:size=2147483647,atrim=0:${DUR},aresample=44100,volume=0.42,afade=t=out:st=${(DUR-3).toFixed(2)}:d=3[aout]`;
 const inputs = voiceOK ? ['-i',VOICE,'-i',MUSIC] : ['-i',MUSIC,'-i',MUSIC];
+/* Size-targeted 2-pass x264: total budget TARGET_MB, audio 96k AAC, the rest video.
+   aq-mode=3 protects the dark starfield from banding at low bitrate. */
+const AUDIO_K = 96;
+const videoK = Math.max(260, Math.min(1400,
+  Math.floor(TARGET_MB * 8192 / DUR) - AUDIO_K - 12));   // -12k mux overhead margin
+console.log(JSON.stringify({encode:{targetMB:TARGET_MB, videoKbps:videoK, audioKbps:AUDIO_K}}));
+const passlog = path.join(WORK,'x264pass');
+const vcommon = ['-c:v','libx264','-preset','slow','-b:v',videoK+'k',
+  '-maxrate',Math.round(videoK*1.35)+'k','-bufsize',Math.round(videoK*2.2)+'k',
+  '-pix_fmt','yuv420p','-r',String(FPS),'-x264-params','aq-mode=3',
+  '-passlogfile',passlog];
+execFileSync('ffmpeg',['-y','-framerate',String(FPS),'-i',path.join(fdir,'f%05d.jpg'),
+  ...vcommon,'-pass','1','-an','-f','null','/dev/null'],{stdio:['ignore','ignore','pipe']});
 execFileSync('ffmpeg',['-y','-framerate',String(FPS),'-i',path.join(fdir,'f%05d.jpg'),...inputs,
   '-filter_complex',af,'-map','0:v','-map','[aout]',
-  '-c:v','libx264','-preset','medium','-crf','19','-pix_fmt','yuv420p','-r',String(FPS),
-  '-c:a','aac','-b:a','160k','-t',String(DUR),OUT],{stdio:['ignore','ignore','pipe']});
+  ...vcommon,'-pass','2',
+  '-c:a','aac','-b:a',AUDIO_K+'k','-movflags','+faststart','-t',String(DUR),OUT],
+  {stdio:['ignore','ignore','pipe']});
 
 /* verify */
 const meta=JSON.parse(ffprobe(OUT,'format=duration,size:stream=codec_type,codec_name,width,height'));
