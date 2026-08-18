@@ -12,7 +12,17 @@ import { execFileSync, spawnSync } from 'child_process';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 const __dir = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dir, '..');
+// Locate the dir that actually contains node_modules (repo root on CI where files
+// sit beside node_modules; the parent when files are in a src/ subfolder locally).
+function findRoot(start){
+  let d = start;
+  for (let i=0;i<5;i++){
+    if (fs.existsSync(path.join(d,'node_modules','@fontsource'))) return d;
+    const up = path.dirname(d); if (up===d) break; d = up;
+  }
+  return start;
+}
+const ROOT = findRoot(__dir);
 
 function arg(n, d){ const i = process.argv.indexOf('--'+n); return i>=0 ? process.argv[i+1] : d; }
 const SYS   = arg('sys','vedic');                      // 'west' | 'vedic'
