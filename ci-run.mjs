@@ -27,10 +27,10 @@ const MURD=['جنوری','فروری','مارچ','اپریل','مئی','جون',
 const monthUr = MURD[+MONTH.slice(5,7)-1]+' '+MONTH.slice(0,4);
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
-async function rfetch(url, opts={}, tries=4){
+async function rfetch(url, opts={}, tries=4, timeoutMs=45000){
   let lastErr=null;
   for(let i=0;i<tries;i++){
-    const ac=new AbortController(); const to=setTimeout(()=>ac.abort(), 45000);
+    const ac=new AbortController(); const to=setTimeout(()=>ac.abort(), timeoutMs);
     try{
       const r=await fetch(url, {...opts, signal:ac.signal,
         headers:{'User-Agent':UA, 'Accept':'application/json,text/plain,*/*', 'Accept-Language':'en,ur;q=0.8',
@@ -55,12 +55,16 @@ async function post(url, form){
 const vault = form => post(FS_BASE+'/api/sky-vault.php', {key:KEY, ...form});
 
 async function fetchVoice(caps, dur, tag){
+  /* 19-Aug: a FRESH ElevenLabs synthesis of ~20 captions can take 1-3 min —
+     the old 45s timeout aborted it (west-aries fail). Wait up to 5 min per try;
+     tts.php caches by text-hash, so even a dropped connection isn't wasted. */
   const r = await rfetch(FS_BASE+'/api/tts.php', {method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({captions:caps.map(c=>({t:c.t,text:c.text})), voice:'ur-PK-UzmaNeural', dur, tag})});
+    body: JSON.stringify({captions:caps.map(c=>({t:c.t,text:c.text})), voice:'ur-PK-UzmaNeural', dur, tag})},
+    3, 300000);
   const j = await r.json().catch(()=>null);
   if (!j || !j.ok || !j.url) throw new Error('tts_failed: '+JSON.stringify(j).slice(0,200));
-  const wav = await rfetch(FS_BASE+'/'+j.url.replace(/^\//,''));
+  const wav = await rfetch(FS_BASE+'/'+j.url.replace(/^\//,''), {}, 4, 120000);
   if (!wav.ok) throw new Error('tts_download_'+wav.status);
   const p = '/tmp/voice-'+tag+'.wav';
   fs.writeFileSync(p, Buffer.from(await wav.arrayBuffer()));
