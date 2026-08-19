@@ -3,7 +3,10 @@ name: Sky Videos v2
 # server (frame-stepped, deterministic), voice (tts.php) + music mixed, uploads
 # to farooqstars.com via api/sky-vault.php (dedup: existing videos are skipped).
 #
-# AUTO  : 28th 23:00 UTC (~2am Doha) => NEXT month, both systems, 2 GENERAL videos.
+# AUTO  : 27th 22:00 UTC => NEXT month, WEST, all 12 signs
+#         28th 22:00 UTC => NEXT month, VEDIC, all 12 signs
+#         (two nights because 24 videos > the 180-min job limit; dedup means
+#          an already-made video is never re-made, so re-runs are safe)
 # MANUAL: Run workflow (or admin page "make") with month/sys/signs
 #         signs '' = general · '6' = one sign · '0,3,6' = several · 'all' = 12.
 
@@ -27,7 +30,8 @@ on:
         required: false
         default: ''
   schedule:
-    - cron: '0 23 28 * *'
+    - cron: '0 22 27 * *'   # west  ×12 (اگلا مہینہ)
+    - cron: '0 22 28 * *'   # vedic ×12 (اگلا مہینہ)
 
 concurrency:
   group: sky-videos
@@ -64,14 +68,23 @@ jobs:
           M="${{ github.event.inputs.month }}"
           if [ -z "$M" ]; then M=$(date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m); fi
           echo "month=$M" >> "$GITHUB_OUTPUT"
+          # cron نے جگایا ہو تو: 27 = برج سب، 28 (یا کوئی اور دن) = راشی سب
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            D=$(date -u +%d)
+            if [ "$D" = "27" ]; then echo "sys=west" >> "$GITHUB_OUTPUT"; else echo "sys=vedic" >> "$GITHUB_OUTPUT"; fi
+            echo "signs=all" >> "$GITHUB_OUTPUT"
+          else
+            echo "sys=${{ github.event.inputs.sys || 'both' }}" >> "$GITHUB_OUTPUT"
+            echo "signs=${{ github.event.inputs.signs }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Render + upload
         env:
           FS_BASE: ${{ secrets.FS_BASE }}
           FS_KEY: ${{ secrets.FS_SKY_SAVE_KEY }}
           MONTH: ${{ steps.m.outputs.month }}
-          SYS: ${{ github.event.inputs.sys || 'both' }}
-          SIGNS: ${{ github.event.inputs.signs || '' }}
+          SYS: ${{ steps.m.outputs.sys }}
+          SIGNS: ${{ steps.m.outputs.signs }}
           FORCE: ${{ github.event.inputs.force || '' }}
           TARGET_MB: '6.5'      # hard size budget per video (5-7 MB rule)
           RENDER_SCALE: '0.5'   # WebGL at half res, text full res => ~4x faster
