@@ -64,7 +64,7 @@ async function fetchVoice(caps, dur, tag){
   if (!wav.ok) throw new Error('tts_download_'+wav.status);
   const p = '/tmp/voice-'+tag+'.wav';
   fs.writeFileSync(p, Buffer.from(await wav.arrayBuffer()));
-  return {path:p, clips:j.clips||null, seconds:j.seconds||null};
+  return {path:p, clips:j.clips||null, seconds:j.seconds||null, via:j.via||''};
 }
 
 function localSignScript(sys, signIdx){
@@ -181,7 +181,18 @@ for (const sys of systems){
       if (Array.isArray(voice.clips) && voice.clips.length===script.caps.length &&
           voice.clips.every(c=>typeof c.sec==='number')){
         script.caps = script.caps.map((c,i)=>({t:+voice.clips[i].sec.toFixed(2), text:c.text}));
+        console.log('caption timing: exact clip starts ('+voice.via+')');
+      } else if (typeof voice.seconds==='number' && voice.seconds>10){
+        /* 19-Aug fix: clips missing/mismatched => at least SCALE the estimates so
+           captions cover the real speech span instead of racing ahead of it */
+        const last = script.caps[script.caps.length-1].t || 1;
+        const k = Math.max(0.2, (voice.seconds - 5) / last);
+        script.caps = script.caps.map(c=>({t:+(c.t*k).toFixed(2), text:c.text}));
+        console.log('caption timing: scaled x'+k.toFixed(2)+' to voice '+voice.seconds+'s');
       }
+      /* video must be long enough to hold the whole voice */
+      if (typeof voice.seconds==='number' && voice.seconds + 4 > script.dur)
+        script.dur = Math.min(150, Math.ceil(voice.seconds + 4));
       await ensureMusic();
       const pagePath = await ensurePage();
       const out='/tmp/out-'+label+'.mp4';
@@ -195,7 +206,7 @@ for (const sys of systems){
       const hashtags = script.hashtags || (isGeneral ? `#astrology #${sys==='vedic'?'vedic':'zodiac'} #urdu #farooqstars`
         : `#${SLUGS[sg]} #astrology #monthlyhoroscope #urdu #farooqstars`);
       const sv = await vault({action:'save', month:MONTH, sys, sign:slug, dur:script.dur, hash:script.hash||'', force:FORCE?'1':'',
-        caption, hashtags, voice:'ur-PK-UzmaNeural', video:{__file:out}});
+        caption, hashtags, voice:(voice.via==='eleven'?'elevenlabs-v3':'ur-PK-UzmaNeural'), video:{__file:out}});
       if (!sv.ok) throw new Error('save_failed '+JSON.stringify(sv).slice(0,200));
       report.push({label, saved:sv.saved, dedup:sv.dedup||false, sizeMB:sv.sizeMB});
       console.log('DONE', label, JSON.stringify(sv));
