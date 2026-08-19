@@ -45,7 +45,12 @@ jobs:
           node-version: '22'
 
       - name: System deps (ffmpeg)
-        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
+        # 19-Aug: run #14 lost 3 hours to a hung apt mirror — cap this step at
+        # 8 min with tight network timeouts; a fast fail beats a silent hang.
+        timeout-minutes: 8
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -y || true
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y ffmpeg
 
       - name: Node deps
         run: npm install --no-audit --no-fund
